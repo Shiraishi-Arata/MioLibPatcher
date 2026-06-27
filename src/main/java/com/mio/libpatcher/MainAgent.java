@@ -39,6 +39,7 @@ public class MainAgent {
         transformers.add(new SableRapierLibTransformer());
         transformers.add(new VeilImGuiTransformer());
         transformers.add(new ImGuiMoulberryTransformer());
+        transformers.add(new InstrumentBootstrapTransformer());
         transformers.forEach(baseTransformer -> {
             inst.addTransformer(baseTransformer, true);
             if (isAgentmain) {
@@ -60,7 +61,6 @@ public class MainAgent {
                     } catch (UnmodifiableClassException e) {
                         LogUtil.error(e.toString());
                     }
-                    break;
                 }
             }
         }
