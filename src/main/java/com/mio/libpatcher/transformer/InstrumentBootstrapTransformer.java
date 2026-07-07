@@ -63,7 +63,6 @@ public class InstrumentBootstrapTransformer implements BaseTransformer {
     }
 
     private void preloadBootstrapHooks(ProtectionDomain protectionDomain, ClassLoader loader, byte[] classfileBuffer) {
-        // Check if already accessible
         try {
             Class.forName("settingdust.lazyyyyy.forge.core.BootstrapHooks", false, null);
             LogUtil.info("BootstrapHooks already accessible in boot classloader");
@@ -73,8 +72,8 @@ public class InstrumentBootstrapTransformer implements BaseTransformer {
         }
 
         if (BootstrapJarLoader.isAvailable()) {
-            // Strategy 1: Extract bootstrap JAR from the class being loaded's code source
-            tryLoadFromCoreJar(protectionDomain);
+            // Strategy 1: Find core JAR via the class's own resource URL (works during initial loading)
+            findAndExtractFromCoreJar(loader);
 
             // Strategy 2: Check for already-exported copy in .lazyyyyy/
             if (!isBootstrapHooksLoaded()) {
@@ -100,50 +99,48 @@ public class InstrumentBootstrapTransformer implements BaseTransformer {
         }
     }
 
-    private void tryLoadFromCoreJar(ProtectionDomain protectionDomain) {
+    private void findAndExtractFromCoreJar(ClassLoader loader) {
         try {
-            if (protectionDomain == null) {
-                LogUtil.info("protectionDomain is null");
+            URL url = (loader != null)
+                ? loader.getResource("settingdust/lazyyyyy/forge/core/ClassLoaderInjector.class")
+                : ClassLoader.getSystemResource("settingdust/lazyyyyy/forge/core/ClassLoaderInjector.class");
+            if (url == null) {
+                LogUtil.info("Class resource not found, scanning directories");
+                tryScanForCoreJar();
                 return;
             }
-            if (protectionDomain.getCodeSource() == null) {
-                LogUtil.info("codeSource is null");
-                return;
-            }
-            URL location = protectionDomain.getCodeSource().getLocation();
-            LogUtil.info("Code source location: " + location);
-            if (location == null) {
-                LogUtil.info("location is null");
-                return;
-            }
-            URI uri = location.toURI();
-            File locationFile = new File(uri);
-            LogUtil.info("location file: " + locationFile + " isFile=" + locationFile.isFile() + " isDir=" + locationFile.isDirectory());
+            LogUtil.info("Found class resource: " + url);
 
-            JarFile coreJar = null;
-            if (locationFile.isFile() && locationFile.getName().endsWith(".jar")) {
-                coreJar = new JarFile(locationFile);
-                LogUtil.info("Opened core JAR: " + locationFile);
-            } else if (locationFile.isDirectory()) {
-                for (File f : locationFile.listFiles()) {
-                    if (f.isFile() && f.getName().contains("lazyyyyy-lexforge-core")) {
-                        coreJar = new JarFile(f);
-                        LogUtil.info("Found core JAR in directory: " + f);
-                        break;
-                    }
-                }
+            if (!"jar".equals(url.getProtocol())) {
+                LogUtil.info("Class not inside a JAR (protocol=" + url.getProtocol() + "), scanning directories");
+                tryScanForCoreJar();
+                return;
             }
 
-            if (coreJar != null) {
+            String path = url.getPath();
+            int sep = path.indexOf('!');
+            if (sep < 0) {
+                LogUtil.info("Unexpected JAR URL format, scanning directories");
+                tryScanForCoreJar();
+                return;
+            }
+
+            String jarUrl = path.substring(0, sep);
+            if (jarUrl.startsWith("file:")) jarUrl = jarUrl.substring(5);
+            File jarFile = new File(new URI(jarUrl));
+            LogUtil.info("Core JAR location: " + jarFile + " isFile=" + jarFile.isFile());
+
+            if (jarFile.isFile()) {
+                JarFile coreJar = new JarFile(jarFile);
                 loadBootstrapJarFromCore(coreJar, "lazyyyyy-lexforge-bootstrap.jar");
                 coreJar.close();
             } else {
-                LogUtil.info("Could not locate core JAR from: " + location);
-                // Try to find core JAR by scanning common locations
+                LogUtil.info("Core JAR file does not exist, scanning directories");
                 tryScanForCoreJar();
             }
         } catch (Exception e) {
-            LogUtil.error("tryLoadFromCoreJar failed: " + e);
+            LogUtil.error("findAndExtractFromCoreJar failed: " + e);
+            tryScanForCoreJar();
         }
     }
 
