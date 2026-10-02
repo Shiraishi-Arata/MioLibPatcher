@@ -16,11 +16,29 @@ public class MainAgent {
 
     public static void premain(String agentArgs, Instrumentation inst) {
         LogUtil.info("MioPatcher is running!");
+        preloadPojavExec();
         addTransformer(inst, false);
     }
 
     public static void agentmain(String agentArgs, Instrumentation inst) {
+        preloadPojavExec();
         addTransformer(inst, true);
+    }
+
+    /**
+     * Load the launcher's native bridge into the game JVM as early as possible.
+     * Mojang's NativeLibrariesBootstrap (e.g. VK.getVulkanDriverHandle on the
+     * 26.x Vulkan path) runs before any LWJGL class init, so without this the
+     * game-side natives resolve to UnsatisfiedLinkError. Failures are non-fatal:
+     * later LWJGL class init (GLFW/CallbackBridge) loads the library anyway.
+     */
+    private static void preloadPojavExec() {
+        try {
+            System.loadLibrary("pojavexec");
+            LogUtil.info("Preloaded pojavexec into the game JVM");
+        } catch (UnsatisfiedLinkError e) {
+            LogUtil.error("Failed to preload pojavexec: " + e.getMessage());
+        }
     }
 
     private static void addTransformer(Instrumentation inst, boolean isAgentmain) {
